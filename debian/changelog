@@ -1,0 +1,31 @@
+polybar (3.1.0-1) unstable; urgency=medium
+
+  * Feat(mpd): State-specific formats (format-playing, format-paused, format-stopped) (#567), see #524
+  * Feat(ipc): Visibility commands (show, hide, toggle, restart, quit) (b6c5563)
+  * Feat(shell): Bash completion (#588)
+  * Feat(menu): expand-right option (#658), see #655
+  * Feat(temperature): hwmon sysfs support (#688), see #404
+  * Feat(cursor): Change cursors over clickable/scrollable areas (#727), see #721
+  * Feat(temperature): Fahrenheit and Celsius tokens (#804)
+  * Feat(mpd): Use mpd name tag or URI as fallback for title-less tracks (#823), see #815
+  * Fix(i3): Clicking workspaces without index (#521), see #520
+  * Fix(parser): Prefix options overriding format options (#729), see #544
+  * Fix(parser): Overline tags (eebf105)
+  * Fix(process_util): Prefix shell environment variable ($POLYBAR_SHELL) (86ff947), see #566
+  * Fix(parser): %{R} tag (reverse colors) (0bd8f1f), see #585
+  * Fix(renderer): Center block position with tray (389bae2 & #673), see #551 & #672
+  * Fix(xworkpaces): Active workspace with XMonad (#587), see #411 & #535
+  * Fix(config): Expand tilde, environment variable (d3b0670 & #724), see #603 & #719
+  * Fix(build): Remove curlbuild.h (#648), see #647
+  * Fix(renderer): Off by one error for actions (#663), see #661
+  * Fix(gcc): GCC 7.1 (jaagr/xpp/#6)
+  * Fix(fs): Use bytes_available for percentage_used (138f5fa), see #710
+  * Fix(fs): Use f_frsize for calculations (a682d2a)
+  * Fix(date): Remove date string length limitation (#745), see #744
+  * Fix(renderer): Nested actions (#772), see #760 and #758
+  * Fix(i3): Check and warn if current workspace not found (#826), see #824
+  * Fix(github): Prevent module disappearing with no connection (#811), see #810
+  * Fix(renderer): Module gradients (#831), see #759
+  * Fix(build): Update deprecated jsoncpp Reader
+
+ -- Zijung Chueh <i@zijung.me>  Tue, 27 Feb 2018 23:36:47 +0800
