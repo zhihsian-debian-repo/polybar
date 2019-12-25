@@ -28,6 +28,8 @@ config::config(const logger& logger, string&& path, string&& bar)
     throw application_error("Could not find config file: " + m_file);
   }
 
+  m_log.info("Loading config: %s", m_file);
+
   parse_file();
   copy_inherited();
 
@@ -43,7 +45,6 @@ config::config(const logger& logger, string&& path, string&& bar)
     throw application_error("Undefined bar: " + m_barname);
   }
 
-  m_log.info("Loaded %s", m_file);
   m_log.trace("config: Current bar section: [%s]", section());
 }
 
@@ -225,29 +226,19 @@ char config::convert(string&& value) const {
 
 template <>
 int config::convert(string&& value) const {
-  return std::atoi(value.c_str());
+  return std::strtol(value.c_str(), nullptr, 10);
 }
 
 template <>
 short config::convert(string&& value) const {
-  return static_cast<short>(std::atoi(value.c_str()));
+  return static_cast<short>(std::strtol(value.c_str(), nullptr, 10));
 }
 
 template <>
 bool config::convert(string&& value) const {
   string lower{string_util::lower(forward<string>(value))};
 
-  if (lower == "true") {
-    return true;
-  } else if (lower == "yes") {
-    return true;
-  } else if (lower == "on") {
-    return true;
-  } else if (lower == "1") {
-    return true;
-  } else {
-    return false;
-  }
+  return (lower == "true" || lower == "yes" || lower == "on" || lower == "1");
 }
 
 template <>

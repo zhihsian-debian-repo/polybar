@@ -1,24 +1,16 @@
 #include "adapters/net.hpp"
 
-#include <cerrno>
-#include <cstdio>
-#include <fstream>
 #include <iomanip>
-#include <sstream>
-#include <utility>
 
+#include <arpa/inet.h>
 #include <linux/ethtool.h>
 #include <linux/if_link.h>
 #include <linux/sockios.h>
 #include <net/if.h>
+#include <netdb.h>
 #include <netinet/in.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
-#include <climits>
-#include <csignal>
-
-#ifdef inline
-#undef inline
-#endif
 
 #include "common.hpp"
 #include "settings.hpp"
@@ -36,12 +28,14 @@ namespace net {
     return file_util::exists("/sys/class/net/" + ifname + "/wireless");
   }
 
+  static const string NO_IP = string("N/A");
+
   // class : network {{{
 
   /**
    * Construct network interface
    */
-  network::network(string interface) : m_interface(move(interface)) {
+  network::network(string interface) : m_log(logger::make()), m_interface(move(interface)) {
     if (if_nametoindex(m_interface.c_str()) == 0) {
       throw network_error("Invalid network interface \"" + m_interface + "\"");
     }
@@ -51,7 +45,7 @@ namespace net {
       throw network_error("Failed to open socket");
     }
 
-    check_tuntap();
+    check_tuntap_or_bridge();
   }
 
   /**
@@ -67,6 +61,8 @@ namespace net {
     m_status.current.transmitted = 0;
     m_status.current.received = 0;
     m_status.current.time = std::chrono::system_clock::now();
+    m_status.ip = NO_IP;
+    m_status.ip6 = NO_IP;
 
     for (auto ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
       if (ifa->ifa_addr == nullptr) {
@@ -79,11 +75,33 @@ namespace net {
         }
       }
 
+      struct sockaddr_in6* sa6;
+
       switch (ifa->ifa_addr->sa_family) {
         case AF_INET:
           char ip_buffer[NI_MAXHOST];
           getnameinfo(ifa->ifa_addr, sizeof(sockaddr_in), ip_buffer, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
           m_status.ip = string{ip_buffer};
+          break;
+
+        case AF_INET6:
+          char ip6_buffer[INET6_ADDRSTRLEN];
+          sa6 = reinterpret_cast<decltype(sa6)>(ifa->ifa_addr);
+          if (IN6_IS_ADDR_LINKLOCAL(&sa6->sin6_addr)) {
+              continue;
+          }
+          if (IN6_IS_ADDR_SITELOCAL(&sa6->sin6_addr)) {
+              continue;
+          }
+          if ((((unsigned char*)sa6->sin6_addr.s6_addr)[0] & 0xFE) == 0xFC) {
+              /* Skip Unique Local Addresses (fc00::/7) */
+              continue;
+          }
+          if (inet_ntop(AF_INET6, &sa6->sin6_addr, ip6_buffer, INET6_ADDRSTRLEN) == 0) {
+              m_log.warn("inet_ntop() " + string(strerror(errno)));
+              continue;
+          }
+          m_status.ip6 = string{ip6_buffer};
           break;
 
         case AF_PACKET:
@@ -119,10 +137,17 @@ namespace net {
   }
 
   /**
-   * Get interface ip address
+   * Get interface ipv4 address
    */
   string network::ip() const {
     return m_status.ip;
+  }
+
+  /**
+   * Get interface ipv6 address
+   */
+  string network::ip6() const {
+    return m_status.ip6;
   }
 
   /**
@@ -142,19 +167,31 @@ namespace net {
   }
 
   /**
-   * Query driver info to check if the
-   * interface is a TUN/TAP device
+   * Set if unknown counts as up
    */
-  void network::check_tuntap() {
+  void network::set_unknown_up(bool unknown) {
+    m_unknown_up = unknown;
+  }
+
+  /**
+   * Query driver info to check if the
+   * interface is a TUN/TAP device or BRIDGE
+   */
+  void network::check_tuntap_or_bridge() {
     struct ethtool_drvinfo driver {};
     struct ifreq request {};
 
     driver.cmd = ETHTOOL_GDRVINFO;
 
     memset(&request, 0, sizeof(request));
-    strncpy(request.ifr_name, m_interface.c_str(), IFNAMSIZ - 0);
 
-    request.ifr_data = reinterpret_cast<caddr_t>(&driver);
+    /*
+     * Only copy array size minus one bytes over to ensure there is a
+     * terminating NUL byte (which is guaranteed by memset)
+     */
+    strncpy(request.ifr_name, m_interface.c_str(), IFNAMSIZ - 1);
+
+    request.ifr_data = reinterpret_cast<char*>(&driver);
 
     if (ioctl(*m_socketfd, SIOCETHTOOL, &request) == -1) {
       return;
@@ -168,13 +205,20 @@ namespace net {
     } else {
       m_tuntap = false;
     }
+
+    if (strncmp(driver.driver, "bridge", 6) == 0) {
+      m_bridge = true;
+    }
+
   }
 
   /**
    * Test if the network interface is in a valid state
    */
   bool network::test_interface() const {
-    return file_util::contents("/sys/class/net/" + m_interface + "/operstate").compare(0, 2, "up") == 0;
+    auto operstate = file_util::contents("/sys/class/net/" + m_interface + "/operstate");
+    bool up = operstate.compare(0, 2, "up") == 0;
+    return m_unknown_up ? (up || operstate.compare(0, 7, "unknown") == 0) : up;
   }
 
   /**
@@ -210,13 +254,20 @@ namespace net {
       return false;
     }
 
+    if(m_bridge) {
+      /* If bridge network then link speed cannot be computed
+       * TODO: Identify the physical network in bridge and compute the link speed
+       */
+      return true;
+    }
+
     struct ifreq request {};
     struct ethtool_cmd data {};
 
     memset(&request, 0, sizeof(request));
     strncpy(request.ifr_name, m_interface.c_str(), IFNAMSIZ - 1);
     data.cmd = ETHTOOL_GSET;
-    request.ifr_data = reinterpret_cast<caddr_t>(&data);
+    request.ifr_data = reinterpret_cast<char*>(&data);
 
     if (ioctl(*m_socketfd, SIOCETHTOOL, &request) == -1) {
       return false;
@@ -241,7 +292,7 @@ namespace net {
     memset(&request, 0, sizeof(request));
     strncpy(request.ifr_name, m_interface.c_str(), IFNAMSIZ - 1);
     data.cmd = ETHTOOL_GLINK;
-    request.ifr_data = reinterpret_cast<caddr_t>(&data);
+    request.ifr_data = reinterpret_cast<char*>(&data);
 
     if (ioctl(*m_socketfd, SIOCETHTOOL, &request) == -1) {
       return false;
@@ -259,133 +310,7 @@ namespace net {
   }
 
   // }}}
-  // class : wireless_network {{{
 
-  /**
-   * Query the wireless device for information
-   * about the current connection
-   */
-  bool wireless_network::query(bool accumulate) {
-    if (!network::query(accumulate)) {
-      return false;
-    }
-
-    auto socket_fd = file_util::make_file_descriptor(iw_sockets_open());
-    if (!*socket_fd) {
-      return false;
-    }
-
-    struct iwreq req {};
-
-    if (iw_get_ext(*socket_fd, m_interface.c_str(), SIOCGIWMODE, &req) == -1) {
-      return false;
-    }
-
-    // Ignore interfaces in ad-hoc mode
-    if (req.u.mode == IW_MODE_ADHOC) {
-      return false;
-    }
-
-    query_essid(*socket_fd);
-    query_quality(*socket_fd);
-
-    return true;
-  }
-
-  /**
-   * Check current connection state
-   */
-  bool wireless_network::connected() const {
-    if (!network::test_interface()) {
-      return false;
-    }
-    return !m_essid.empty();
-  }
-
-  /**
-   * ESSID reported by last query
-   */
-  string wireless_network::essid() const {
-    return m_essid;
-  }
-
-  /**
-   * Signal strength percentage reported by last query
-   */
-  int wireless_network::signal() const {
-    return m_signalstrength.percentage();
-  }
-
-  /**
-   * Link quality percentage reported by last query
-   */
-  int wireless_network::quality() const {
-    return m_linkquality.percentage();
-  }
-
-  /**
-   * Query for ESSID
-   */
-  void wireless_network::query_essid(const int& socket_fd) {
-    char essid[IW_ESSID_MAX_SIZE + 1];
-
-    struct iwreq req {};
-    req.u.essid.pointer = &essid;
-    req.u.essid.length = sizeof(essid);
-    req.u.essid.flags = 0;
-
-    if (iw_get_ext(socket_fd, m_interface.c_str(), SIOCGIWESSID, &req) != -1) {
-      m_essid = string{essid};
-    } else {
-      m_essid.clear();
-    }
-  }
-
-  /**
-   * Query for device driver quality values
-   */
-  void wireless_network::query_quality(const int& socket_fd) {
-    iwrange range{};
-    iwstats stats{};
-
-    // Fill range
-    if (iw_get_range_info(socket_fd, m_interface.c_str(), &range) == -1) {
-      return;
-    }
-    // Fill stats
-    if (iw_get_stats(socket_fd, m_interface.c_str(), &stats, &range, 1) == -1) {
-      return;
-    }
-
-    // Check if the driver supplies the quality value
-    if (stats.qual.updated & IW_QUAL_QUAL_INVALID) {
-      return;
-    }
-    // Check if the driver supplies the quality level value
-    if (stats.qual.updated & IW_QUAL_LEVEL_INVALID) {
-      return;
-    }
-
-    // Check if the link quality has been uodated
-    if (stats.qual.updated & IW_QUAL_QUAL_UPDATED) {
-      m_linkquality.val = stats.qual.qual;
-      m_linkquality.max = range.max_qual.qual;
-    }
-
-    // Check if the signal strength has been uodated
-    if (stats.qual.updated & IW_QUAL_LEVEL_UPDATED) {
-      m_signalstrength.val = stats.qual.level;
-      m_signalstrength.max = range.max_qual.level;
-
-      // Check if the values are defined in dBm
-      if (stats.qual.level > range.max_qual.level) {
-        m_signalstrength.val -= 0x100;
-        m_signalstrength.max = (stats.qual.level - range.max_qual.level) - 0x100;
-      }
-    }
-  }
-
-  // }}}
-}
+}  // namespace net
 
 POLYBAR_NS_END

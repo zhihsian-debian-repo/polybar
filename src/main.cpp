@@ -3,12 +3,10 @@
 #include "components/config.hpp"
 #include "components/controller.hpp"
 #include "components/ipc.hpp"
-#include "components/parser.hpp"
-#include "components/renderer.hpp"
 #include "utils/env.hpp"
 #include "utils/inotify.hpp"
 #include "utils/process.hpp"
-#include "x11/tray_manager.hpp"
+#include "x11/connection.hpp"
 
 using namespace polybar;
 
@@ -80,9 +78,10 @@ int main(int argc, char** argv) {
     if (cli->has("list-monitors")) {
       for (auto&& mon : randr_util::get_monitors(conn, conn.root(), true)) {
         if (WITH_XRANDR_MONITORS && mon->output == XCB_NONE) {
-          printf("%s: %ix%i+%i+%i (XRandR monitor)\n", mon->name.c_str(), mon->w, mon->h, mon->x, mon->y);
+          printf("%s: %ix%i+%i+%i (XRandR monitor%s)\n", mon->name.c_str(), mon->w, mon->h, mon->x, mon->y,
+              mon->primary ? ", primary" : "");
         } else {
-          printf("%s: %ix%i+%i+%i\n", mon->name.c_str(), mon->w, mon->h, mon->x, mon->y);
+          printf("%s: %ix%i+%i+%i%s\n", mon->name.c_str(), mon->w, mon->h, mon->x, mon->y, mon->primary ? " (primary)" : "");
         }
       }
       return EXIT_SUCCESS;

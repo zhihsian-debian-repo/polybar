@@ -5,6 +5,7 @@
 #include "drawtypes/ramp.hpp"
 #include "utils/file.hpp"
 #include "utils/math.hpp"
+#include "utils/string.hpp"
 
 #include "modules/meta/base.inl"
 
@@ -83,14 +84,24 @@ namespace modules {
 
     // Make consumption reader
     m_consumption_reader = make_unique<consumption_reader>([this] {
-      unsigned long current{std::strtoul(file_util::contents(m_frate).c_str(), nullptr, 10)};
-      unsigned long voltage{std::strtoul(file_util::contents(m_fvoltage).c_str(), nullptr, 10)};
-	  
-      float consumption = ((voltage / 1000.0) * (current /  1000.0)) / 1e6;
-	
+      float consumption;
+
+      // if the rate we found was the current, calculate power (P = I*V)
+      if (string_util::contains(m_frate, "current_now")) {
+        unsigned long current{std::strtoul(file_util::contents(m_frate).c_str(), nullptr, 10)};
+        unsigned long voltage{std::strtoul(file_util::contents(m_fvoltage).c_str(), nullptr, 10)};
+
+        consumption = ((voltage / 1000.0) * (current /  1000.0)) / 1e6;
+      // if it was power, just use as is
+      } else {
+        unsigned long power{std::strtoul(file_util::contents(m_frate).c_str(), nullptr, 10)};
+
+        consumption = power / 1e6;
+      }
+
       // convert to string with 2 decimmal places
       string rtn(16, '\0'); // 16 should be plenty big. Cant see it needing more than 6/7..
-      auto written = std::snprintf(&rtn[0], rtn.size(), "%.2f", consumption); 
+      auto written = std::snprintf(&rtn[0], rtn.size(), "%.2f", consumption);
       rtn.resize(written);
 
       return rtn;
@@ -98,17 +109,20 @@ namespace modules {
 
     // Load state and capacity level
     m_state = current_state();
-    m_percentage = current_percentage(m_state);
+    m_percentage = current_percentage();
 
     // Add formats and elements
     m_formatter->add(FORMAT_CHARGING, TAG_LABEL_CHARGING,
         {TAG_BAR_CAPACITY, TAG_RAMP_CAPACITY, TAG_ANIMATION_CHARGING, TAG_LABEL_CHARGING});
-    m_formatter->add(
-        FORMAT_DISCHARGING, TAG_LABEL_DISCHARGING, {TAG_BAR_CAPACITY, TAG_RAMP_CAPACITY, TAG_LABEL_DISCHARGING});
+    m_formatter->add(FORMAT_DISCHARGING, TAG_LABEL_DISCHARGING,
+        {TAG_BAR_CAPACITY, TAG_RAMP_CAPACITY, TAG_ANIMATION_DISCHARGING, TAG_LABEL_DISCHARGING});
     m_formatter->add(FORMAT_FULL, TAG_LABEL_FULL, {TAG_BAR_CAPACITY, TAG_RAMP_CAPACITY, TAG_LABEL_FULL});
 
     if (m_formatter->has(TAG_ANIMATION_CHARGING, FORMAT_CHARGING)) {
       m_animation_charging = load_animation(m_conf, name(), TAG_ANIMATION_CHARGING);
+    }
+    if (m_formatter->has(TAG_ANIMATION_DISCHARGING, FORMAT_DISCHARGING)) {
+      m_animation_discharging = load_animation(m_conf, name(), TAG_ANIMATION_DISCHARGING);
     }
     if (m_formatter->has(TAG_BAR_CAPACITY)) {
       m_bar_capacity = load_progressbar(m_bar, m_conf, name(), TAG_BAR_CAPACITY);
@@ -185,7 +199,7 @@ namespace modules {
    */
   bool battery_module::on_event(inotify_event* event) {
     auto state = current_state();
-    auto percentage = current_percentage(state);
+    auto percentage = current_percentage();
 
     // Reset timer to avoid unnecessary polling
     m_lastpoll = chrono::system_clock::now();
@@ -215,9 +229,10 @@ namespace modules {
 
     if (label) {
       label->reset_tokens();
-      label->replace_token("%percentage%", to_string(m_percentage));
+      label->replace_token("%percentage%", to_string(clamp_percentage(m_percentage, m_state)));
+      label->replace_token("%percentage_raw%", to_string(m_percentage));
       label->replace_token("%consumption%", current_consumption());
-	  
+
       if (m_state != battery_module::state::FULL && !m_timeformat.empty()) {
         label->replace_token("%time%", current_time());
       }
@@ -245,10 +260,12 @@ namespace modules {
   bool battery_module::build(builder* builder, const string& tag) const {
     if (tag == TAG_ANIMATION_CHARGING) {
       builder->node(m_animation_charging->get());
+    } else if (tag == TAG_ANIMATION_DISCHARGING) {
+      builder->node(m_animation_discharging->get());
     } else if (tag == TAG_BAR_CAPACITY) {
-      builder->node(m_bar_capacity->output(m_percentage));
+      builder->node(m_bar_capacity->output(clamp_percentage(m_percentage, m_state)));
     } else if (tag == TAG_RAMP_CAPACITY) {
-      builder->node(m_ramp_capacity->get_by_percentage(m_percentage));
+      builder->node(m_ramp_capacity->get_by_percentage(clamp_percentage(m_percentage, m_state)));
     } else if (tag == TAG_LABEL_CHARGING) {
       builder->node(m_label_charging);
     } else if (tag == TAG_LABEL_DISCHARGING) {
@@ -278,10 +295,13 @@ namespace modules {
   /**
    * Get the current capacity level
    */
-  int battery_module::current_percentage(state state) {
-    int percentage{read(*m_capacity_reader)};
+  int battery_module::current_percentage() {
+    return read(*m_capacity_reader);
+  }
+
+  int battery_module::clamp_percentage(int percentage, state state) const {
     if (state == battery_module::state::FULL && percentage >= m_fullat) {
-      percentage = 100;
+      return 100;
     }
     return percentage;
   }
@@ -290,7 +310,7 @@ namespace modules {
   * Get the current power consumption
   */
   string battery_module::current_consumption() {
-    return read(*m_consumption_reader);	
+    return read(*m_consumption_reader);
   }
 
   /**
@@ -316,21 +336,26 @@ namespace modules {
   }
 
   /**
-   * Subthread runner that emit update events
-   * to refresh <animation-charging> in case it is used.
+   * Subthread runner that emits update events to refresh <animation-charging>
+   * or <animation-discharging> in case they are used. Note, that it is ok to
+   * use a single thread, because the two animations are never shown at the
+   * same time.
    */
   void battery_module::subthread() {
     chrono::duration<double> dur{0.0};
 
-    if (m_animation_charging) {
+    if (battery_module::state::CHARGING == m_state && m_animation_charging) {
       dur += chrono::milliseconds{m_animation_charging->framerate()};
+    } else if (battery_module::state::DISCHARGING == m_state && m_animation_discharging) {
+      dur += chrono::milliseconds{m_animation_discharging->framerate()};
     } else {
       dur += 1s;
     }
 
     while (running()) {
       for (int i = 0; running() && i < dur.count(); ++i) {
-        if (m_state == battery_module::state::CHARGING) {
+        if (m_state == battery_module::state::CHARGING ||
+            m_state == battery_module::state::DISCHARGING) {
           broadcast();
         }
         sleep(dur);

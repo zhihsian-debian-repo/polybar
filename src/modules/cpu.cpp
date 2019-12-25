@@ -18,6 +18,8 @@ namespace modules {
   cpu_module::cpu_module(const bar_settings& bar, string name_) : timer_module<cpu_module>(bar, move(name_)) {
     m_interval = m_conf.get<decltype(m_interval)>(name(), "interval", 1s);
 
+    m_ramp_padding = m_conf.get<decltype(m_ramp_padding)>(name(), "ramp-coreload-spacing", 1);
+
     m_formatter->add(DEFAULT_FORMAT, TAG_LABEL, {TAG_LABEL, TAG_BAR_LOAD, TAG_RAMP_LOAD, TAG_RAMP_LOAD_PER_CORE});
 
     // warmup cpu times
@@ -34,16 +36,6 @@ namespace modules {
       m_rampload_core = load_ramp(m_conf, name(), TAG_RAMP_LOAD_PER_CORE);
     }
     if (m_formatter->has(TAG_LABEL)) {
-      // Update the label parameter and replace the %percentag-cores% token with the individual core tokens
-      string key{&TAG_LABEL[1], strlen(TAG_LABEL) - 2};
-      auto label = m_conf.get<string>(name(), key, "%percentage%%");
-      vector<string> cores;
-      for (size_t i = 1; i <= m_cputimes.size(); i++) {
-        cores.emplace_back("%percentage-core" + to_string(i) + "%%");
-      }
-      label = string_util::replace_all(label, "%percentage-cores%", string_util::join(cores, " "));
-      const_cast<config&>(m_conf).set(name(), key, move(label));
-
       m_label = load_optional_label(m_conf, name(), TAG_LABEL, "%percentage%%");
     }
   }
@@ -77,6 +69,8 @@ namespace modules {
     if (m_label) {
       m_label->reset_tokens();
       m_label->replace_token("%percentage%", to_string(static_cast<int>(m_total + 0.5)));
+      m_label->replace_token("%percentage-sum%", to_string(static_cast<int>(m_total * static_cast<float>(cores_n) + 0.5)));
+      m_label->replace_token("%percentage-cores%", string_util::join(percentage_cores, "% ") + "%");
 
       for (size_t i = 0; i < percentage_cores.size(); i++) {
         m_label->replace_token("%percentage-core" + to_string(i + 1) + "%", percentage_cores[i]);
@@ -97,7 +91,7 @@ namespace modules {
       auto i = 0;
       for (auto&& load : m_load) {
         if (i++ > 0) {
-          builder->space(1);
+          builder->space(m_ramp_padding);
         }
         builder->node(m_rampload_core->get_by_percentage(load));
       }

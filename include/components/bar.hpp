@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib>
 #include <atomic>
 #include <mutex>
 
@@ -8,6 +9,7 @@
 #include "errors.hpp"
 #include "events/signal_fwd.hpp"
 #include "events/signal_receiver.hpp"
+#include "utils/math.hpp"
 #include "settings.hpp"
 #include "x11/types.hpp"
 #include "x11/window.hpp"
@@ -25,8 +27,29 @@ class taskqueue;
 class tray_manager;
 // }}}
 
+/**
+ * Allows a new format for pixel sizes (like width in the bar section)
+ *
+ * The new format is X%:Z, where X is in [0, 100], and Z is any real value
+ * describing a pixel offset. The actual value is calculated by X% * max + Z
+ */
+inline double geom_format_to_pixels(std::string str, double max) {
+  size_t i;
+  if ((i = str.find(':')) != std::string::npos) {
+    std::string a = str.substr(0, i - 1);
+    std::string b = str.substr(i + 1);
+    return math_util::max<double>(0,math_util::percentage_to_value<double>(strtod(a.c_str(), nullptr), max) + strtod(b.c_str(), nullptr));
+  } else {
+    if (str.find('%') != std::string::npos) {
+      return math_util::percentage_to_value<double>(strtod(str.c_str(), nullptr), max);
+    } else {
+      return strtod(str.c_str(), nullptr);
+    }
+  }
+}
+
 class bar : public xpp::event::sink<evt::button_press, evt::expose, evt::property_notify, evt::enter_notify,
-                evt::leave_notify, evt::motion_notify, evt::destroy_notify, evt::client_message>,
+                evt::leave_notify, evt::motion_notify, evt::destroy_notify, evt::client_message, evt::configure_notify>,
             public signal_receiver<SIGN_PRIORITY_BAR, signals::eventqueue::start, signals::ui::tick,
                 signals::ui::shade_window, signals::ui::unshade_window, signals::ui::dim_window
 #if WITH_XCURSOR
@@ -51,6 +74,8 @@ class bar : public xpp::event::sink<evt::button_press, evt::expose, evt::propert
 
  protected:
   void restack_window();
+  void reconfigue_window();
+  void reconfigure_geom();
   void reconfigure_pos();
   void reconfigure_struts();
   void reconfigure_wm_hints();
@@ -64,6 +89,7 @@ class bar : public xpp::event::sink<evt::button_press, evt::expose, evt::propert
   void handle(const evt::button_press& evt);
   void handle(const evt::expose& evt);
   void handle(const evt::property_notify& evt);
+  void handle(const evt::configure_notify& evt);
 
   bool on(const signals::eventqueue::start&);
   bool on(const signals::ui::unshade_window&);
@@ -80,9 +106,9 @@ class bar : public xpp::event::sink<evt::button_press, evt::expose, evt::propert
   const config& m_conf;
   const logger& m_log;
   unique_ptr<screen> m_screen;
-  unique_ptr<tray_manager> m_tray{};
-  unique_ptr<renderer> m_renderer{};
-  unique_ptr<parser> m_parser{};
+  unique_ptr<tray_manager> m_tray;
+  unique_ptr<renderer> m_renderer;
+  unique_ptr<parser> m_parser;
   unique_ptr<taskqueue> m_taskqueue;
 
   bar_settings m_opts{};

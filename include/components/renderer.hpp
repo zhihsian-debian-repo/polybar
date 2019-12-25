@@ -2,6 +2,7 @@
 
 #include <bitset>
 #include <cairo/cairo.h>
+#include <memory>
 
 #include "cairo/fwd.hpp"
 #include "common.hpp"
@@ -17,6 +18,8 @@ POLYBAR_NS
 class connection;
 class config;
 class logger;
+class background_manager;
+class bg_slice;
 // }}}
 
 using std::map;
@@ -39,7 +42,7 @@ class renderer
   static make_type make(const bar_settings& bar);
 
   explicit renderer(
-      connection& conn, signal_emitter& sig, const config&, const logger& logger, const bar_settings& bar);
+      connection& conn, signal_emitter& sig, const config&, const logger& logger, const bar_settings& bar, background_manager& background_manager);
   ~renderer();
 
   xcb_window_t window() const;
@@ -95,6 +98,7 @@ class renderer
   const config& m_conf;
   const logger& m_log;
   const bar_settings& m_bar;
+  std::shared_ptr<bg_slice> m_background;
 
   int m_depth{32};
   xcb_window_t m_window;
@@ -118,6 +122,7 @@ class renderer
   cairo_operator_t m_comp_ol{CAIRO_OPERATOR_OVER};
   cairo_operator_t m_comp_ul{CAIRO_OPERATOR_OVER};
   cairo_operator_t m_comp_border{CAIRO_OPERATOR_OVER};
+  bool m_pseudo_transparency{false};
 
   alignment m_align;
   std::bitset<3> m_attr;

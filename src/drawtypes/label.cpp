@@ -47,14 +47,18 @@ namespace drawtypes {
     }
 
     for (auto&& tok : m_tokens) {
+      string repl{replacement};
       if (token == tok.token) {
-        if (tok.max != 0_z && string_util::char_len(replacement) > tok.max) {
-          replacement = string_util::utf8_truncate(std::move(replacement), tok.max) + tok.suffix;
-        } else if (tok.min != 0_z && replacement.length() < tok.min) {
-          replacement.insert(0_z, tok.min - replacement.length(), ' ');
+        if (tok.max != 0_z && string_util::char_len(repl) > tok.max) {
+          repl = string_util::utf8_truncate(std::move(repl), tok.max) + tok.suffix;
+        } else if (tok.min != 0_z && repl.length() < tok.min) {
+          repl.insert(0_z, tok.min - repl.length(), tok.zpad ? '0' : ' ');
         }
-        m_tokenized = string_util::replace_all(m_tokenized, token, move(replacement));
-        m_tokenized = string_util::replace_all(m_tokenized, token, move(replacement));
+
+        /*
+         * Only replace first occurence, so that the proper token objects can be used
+         */
+        m_tokenized = string_util::replace(m_tokenized, token, move(repl));
       }
     }
   }
@@ -147,12 +151,6 @@ namespace drawtypes {
       text = conf.get(section, name, move(def));
     }
 
-    size_t len{text.size()};
-
-    if (len > 2 && text[0] == '"' && text[len - 1] == '"') {
-      text = text.substr(1, len - 2);
-    }
-
     const auto get_left_right = [&](string key) {
       auto value = conf.get(section, key, 0U);
       auto left = conf.get(section, key + "-left", value);
@@ -191,6 +189,8 @@ namespace drawtypes {
 
       try {
         token.min = std::stoul(&token_str[pos + 1], nullptr, 10);
+        // When the number starts with 0 the string is 0-padded
+        token.zpad = token_str[pos + 1] == '0';
       } catch (const std::invalid_argument& err) {
         continue;
       }
@@ -217,6 +217,16 @@ namespace drawtypes {
       }
     }
 
+    size_t maxlen = conf.get(section, name + "-maxlen", 0_z);
+    bool ellipsis = conf.get(section, name + "-ellipsis", true);
+
+    if(ellipsis && maxlen > 0 && maxlen < 3) {
+      throw application_error(sstream()
+          << "Label " << section << "." << name
+          << " has maxlen " << maxlen
+          << ", which is smaller than length of ellipsis (3)");
+    }
+
     // clang-format off
     return factory_util::shared<label>(text,
         conf.get(section, name + "-foreground", ""s),
@@ -226,8 +236,8 @@ namespace drawtypes {
         conf.get(section, name + "-font", 0),
         padding,
         margin,
-        conf.get(section, name + "-maxlen", 0_z),
-        conf.get(section, name + "-ellipsis", true),
+        maxlen,
+        ellipsis,
         move(tokens));
     // clang-format on
   }
@@ -239,19 +249,6 @@ namespace drawtypes {
     return load_label(conf, move(section), move(name), false, move(def));
   }
 
-  /**
-   * Create an icon by loading values from the configuration
-   */
-  icon_t load_icon(const config& conf, string section, string name, bool required, string def) {
-    return load_label(conf, move(section), move(name), required, move(def));
-  }
-
-  /**
-   * Create an icon by loading optional values from the configuration
-   */
-  icon_t load_optional_icon(const config& conf, string section, string name, string def) {
-    return load_icon(conf, move(section), move(name), false, move(def));
-  }
 }
 
 POLYBAR_NS_END

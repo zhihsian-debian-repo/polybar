@@ -9,7 +9,22 @@ set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${PROJECT_SOURCE_DIR}/cmake)
 find_package(PkgConfig)
 pkg_check_modules(XCBPROTO REQUIRED xcb-proto)
 
-find_package(PythonInterp 2.7 REQUIRED)
+# Store the location of the proto xml files inside XCBPROTO_XCBINCLUDEDIR
+if(${CMAKE_VERSION} VERSION_LESS "3.4.0")
+    # pkg_get_variable was introduced in 3.4.0 if it isn't available, we fall back to ${prefix}/share/xcb
+
+    if(NOT XCBPROTO_PREFIX)
+        set(XCBPROTO_PREFIX /usr)
+    endif()
+
+    set(XCBPROTO_XCBINCLUDEDIR ${XCBPROTO_PREFIX}/share/xcb)
+    message(STATUS "${PROJECT_NAME}: pkg_get_variable not supported, setting XCBPROTO_XCBINCLUDEDIR to ${XCBPROTO_XCBINCLUDEDIR}")
+else()
+    # The xml file that need to be included later are stored in xcbincludedir as defined in xcb-proto.pc
+    pkg_get_variable(XCBPROTO_XCBINCLUDEDIR xcb-proto xcbincludedir)
+endif()
+
+find_package(PythonInterp 3.5 REQUIRED)
 find_package(XCB REQUIRED XCB ICCCM EWMH UTIL IMAGE)
 
 if(NOT PYTHON_EXECUTABLE)
@@ -33,7 +48,7 @@ set(XPP_LIBRARIES
 #
 # Loop through a hardcoded list of python executables to locate the python module "xcbgen"
 #
-foreach(CURRENT_EXECUTABLE python2 python2.7 python3 python)
+foreach(CURRENT_EXECUTABLE python python3 python2 python2.7)
   message(STATUS "Searching for xcbgen with " ${CURRENT_EXECUTABLE})
 
   execute_process(COMMAND "${CURRENT_EXECUTABLE}" "-c"
@@ -124,10 +139,7 @@ endif()
 
 set(PROTO_LIST)
 
-if(NOT XCBPROTO_PREFIX)
-  set(XCBPROTO_PREFIX /usr)
-endif()
-file(GLOB PROTO_LIST_RAW RELATIVE ${XCBPROTO_PREFIX}/share/xcb ${XCBPROTO_PREFIX}/share/xcb/*.xml)
+file(GLOB PROTO_LIST_RAW RELATIVE ${XCBPROTO_XCBINCLUDEDIR} ${XCBPROTO_XCBINCLUDEDIR}/*.xml)
 
 #
 # Filter glob
@@ -150,7 +162,7 @@ foreach(PROTO ${PROTO_LIST})
   add_custom_command(
     OUTPUT ${OUTPUT_FILE}
     COMMAND ${PYTHON_EXECUTABLE} ${PROJECT_SOURCE_DIR}/generators/cpp_client.py -p "${PYTHON_XCBGEN}"
-    ${XCBPROTO_PREFIX}/share/xcb/${PROTO}.xml > ${OUTPUT_FILE})
+    ${XCBPROTO_XCBINCLUDEDIR}/${PROTO}.xml > ${OUTPUT_FILE})
   list(APPEND PROTO_HEADER_FILES ${OUTPUT_FILE})
 endforeach(PROTO)
 
@@ -158,7 +170,7 @@ endforeach(PROTO)
 # Create project lib and commands
 #
 file(GLOB_RECURSE HEADER_FILES ${PROJECT_SOURCE_DIR}/include/*.hpp)
-add_library(${PROJECT_NAME} ${HEADER_FILES} ${PROTO_HEADER_FILES})
+add_library(${PROJECT_NAME} STATIC ${HEADER_FILES} ${PROTO_HEADER_FILES})
 
 target_include_directories(${PROJECT_NAME} PUBLIC ${XPP_INCLUDE_DIRS})
 target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/include/xpp)
