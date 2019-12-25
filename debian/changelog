@@ -1,3 +1,12 @@
+polybar (3.4.1-1) unstable; urgency=medium
+
+  * ipc:
+    * Update bar when making it visible (#1889), see #1875
+    * Set bar position when making it visible (#1901), see #1484, i3/i3#3834
+  * internal/backlight: Use correct brightness file for amdgpu_bl0 (#1900)
+
+ -- Zhihsian Que <i@zhihsian.me>  Wed, 25 Dec 2019 15:25:33 +0800
+
 polybar (3.1.0-1) unstable; urgency=medium
 
   * Feat(mpd): State-specific formats (format-playing, format-paused, format-stopped) (#567), see #524
@@ -28,4 +37,4 @@ polybar (3.1.0-1) unstable; urgency=medium
   * Fix(renderer): Module gradients (#831), see #759
   * Fix(build): Update deprecated jsoncpp Reader
 
- -- Zijung Chueh <i@zijung.me>  Tue, 27 Feb 2018 23:36:47 +0800
+ -- Zhihsian Que <i@zhihsian.me>  Tue, 27 Feb 2018 23:36:47 +0800

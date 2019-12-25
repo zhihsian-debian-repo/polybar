@@ -1,0 +1,29 @@
+From: Zhihsian Que <i@zhihsian.me>
+Date: Wed, 25 Dec 2019 16:27:35 +0800
+Subject: =?utf-8?b?5L+u5pS5IGpzb25jcHAg5pyA5L2O54mI5pys54iyIDEuNy40?=
+
+---
+ lib/i3ipcpp/CMakeLists.txt | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/lib/i3ipcpp/CMakeLists.txt b/lib/i3ipcpp/CMakeLists.txt
+index 4bf6f3b..b93b8b1 100644
+--- a/lib/i3ipcpp/CMakeLists.txt
++++ b/lib/i3ipcpp/CMakeLists.txt
+@@ -21,13 +21,13 @@ target_compile_options(${PROJECT_NAME} PRIVATE -std=c++11 -Wall -Wextra -Wno-unu
+ target_compile_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Debug>:-g3 -DDEBUG>)
+ target_compile_options(${PROJECT_NAME} PRIVATE $<$<CONFIG:Release>:-O2>)
+ 
+-# External library: jsoncpp-1.7.7 {{{
++# External library: jsoncpp-1.7.4 {{{
+ 
+ find_package(PkgConfig)
+-pkg_check_modules(JSONCPP jsoncpp>=1.7.7)
++pkg_check_modules(JSONCPP jsoncpp>=1.7.4)
+ 
+ if(NOT JSONCPP_FOUND)
+-  message(STATUS "Could not find jsoncpp>=1.7.7 -- building static lib...")
++  message(STATUS "Could not find jsoncpp>=1.7.4 -- building static lib...")
+   add_subdirectory(${PROJECT_SOURCE_DIR}/libs/jsoncpp-1.7.7 EXCLUDE_FROM_ALL)
+   set(JSONCPP_LIBRARIES jsoncpp_lib_static)
+   set(JSONCPP_INCLUDEDIR ${PROJECT_SOURCE_DIR}/libs/jsoncpp-1.7.7/include)
