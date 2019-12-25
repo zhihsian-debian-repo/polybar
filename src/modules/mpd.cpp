@@ -24,9 +24,11 @@ namespace modules {
     for (auto&& format : {FORMAT_PLAYING, FORMAT_PAUSED, FORMAT_STOPPED}) {
       m_formatter->add(format, format_online,
           {TAG_BAR_PROGRESS, TAG_TOGGLE, TAG_TOGGLE_STOP, TAG_LABEL_SONG, TAG_LABEL_TIME, TAG_ICON_RANDOM,
-              TAG_ICON_REPEAT, TAG_ICON_REPEAT_ONE, TAG_ICON_PREV, TAG_ICON_STOP, TAG_ICON_PLAY, TAG_ICON_PAUSE,
-              TAG_ICON_NEXT, TAG_ICON_SEEKB, TAG_ICON_SEEKF});
+              TAG_ICON_REPEAT, TAG_ICON_REPEAT_ONE, TAG_ICON_SINGLE, TAG_ICON_PREV, TAG_ICON_STOP, TAG_ICON_PLAY, TAG_ICON_PAUSE,
+              TAG_ICON_NEXT, TAG_ICON_SEEKB, TAG_ICON_SEEKF, TAG_ICON_CONSUME});
+
       auto mod_format = m_formatter->get(format);
+
       mod_format->fg = m_conf.get(name(), FORMAT_ONLINE + "-foreground"s, mod_format->fg);
       mod_format->bg = m_conf.get(name(), FORMAT_ONLINE + "-background"s, mod_format->bg);
       mod_format->ul = m_conf.get(name(), FORMAT_ONLINE + "-underline"s, mod_format->ul);
@@ -37,7 +39,19 @@ namespace modules {
       mod_format->padding = m_conf.get(name(), FORMAT_ONLINE + "-padding"s, mod_format->padding);
       mod_format->margin = m_conf.get(name(), FORMAT_ONLINE + "-margin"s, mod_format->margin);
       mod_format->offset = m_conf.get(name(), FORMAT_ONLINE + "-offset"s, mod_format->offset);
+      mod_format->font = m_conf.get(name(), FORMAT_ONLINE + "-font"s, mod_format->font);
 
+      try {
+        mod_format->prefix = load_label(m_conf, name(), FORMAT_ONLINE + "-prefix"s);
+      } catch (const key_error& err) {
+        // format-online-prefix not defined
+      }
+
+      try {
+        mod_format->suffix = load_label(m_conf, name(), FORMAT_ONLINE + "-suffix"s);
+      } catch (const key_error& err) {
+        // format-online-suffix not defined
+      }
     }
 
     m_formatter->add(FORMAT_OFFLINE, "", {TAG_LABEL_OFFLINE});
@@ -45,34 +59,45 @@ namespace modules {
     m_icons = factory_util::shared<iconset>();
 
     if (m_formatter->has(TAG_ICON_PLAY) || m_formatter->has(TAG_TOGGLE) || m_formatter->has(TAG_TOGGLE_STOP)) {
-      m_icons->add("play", load_icon(m_conf, name(), TAG_ICON_PLAY));
+      m_icons->add("play", load_label(m_conf, name(), TAG_ICON_PLAY));
     }
     if (m_formatter->has(TAG_ICON_PAUSE) || m_formatter->has(TAG_TOGGLE)) {
-      m_icons->add("pause", load_icon(m_conf, name(), TAG_ICON_PAUSE));
+      m_icons->add("pause", load_label(m_conf, name(), TAG_ICON_PAUSE));
     }
     if (m_formatter->has(TAG_ICON_STOP) || m_formatter->has(TAG_TOGGLE_STOP)) {
-      m_icons->add("stop", load_icon(m_conf, name(), TAG_ICON_STOP));
+      m_icons->add("stop", load_label(m_conf, name(), TAG_ICON_STOP));
     }
     if (m_formatter->has(TAG_ICON_PREV)) {
-      m_icons->add("prev", load_icon(m_conf, name(), TAG_ICON_PREV));
+      m_icons->add("prev", load_label(m_conf, name(), TAG_ICON_PREV));
     }
     if (m_formatter->has(TAG_ICON_NEXT)) {
-      m_icons->add("next", load_icon(m_conf, name(), TAG_ICON_NEXT));
+      m_icons->add("next", load_label(m_conf, name(), TAG_ICON_NEXT));
     }
     if (m_formatter->has(TAG_ICON_SEEKB)) {
-      m_icons->add("seekb", load_icon(m_conf, name(), TAG_ICON_SEEKB));
+      m_icons->add("seekb", load_label(m_conf, name(), TAG_ICON_SEEKB));
     }
     if (m_formatter->has(TAG_ICON_SEEKF)) {
-      m_icons->add("seekf", load_icon(m_conf, name(), TAG_ICON_SEEKF));
+      m_icons->add("seekf", load_label(m_conf, name(), TAG_ICON_SEEKF));
     }
     if (m_formatter->has(TAG_ICON_RANDOM)) {
-      m_icons->add("random", load_icon(m_conf, name(), TAG_ICON_RANDOM));
+      m_icons->add("random", load_label(m_conf, name(), TAG_ICON_RANDOM));
     }
     if (m_formatter->has(TAG_ICON_REPEAT)) {
-      m_icons->add("repeat", load_icon(m_conf, name(), TAG_ICON_REPEAT));
+      m_icons->add("repeat", load_label(m_conf, name(), TAG_ICON_REPEAT));
     }
-    if (m_formatter->has(TAG_ICON_REPEAT_ONE)) {
-      m_icons->add("repeat_one", load_icon(m_conf, name(), TAG_ICON_REPEAT_ONE));
+
+    if (m_formatter->has(TAG_ICON_SINGLE)) {
+      m_icons->add("single", load_label(m_conf, name(), TAG_ICON_SINGLE));
+    }
+    else if(m_formatter->has(TAG_ICON_REPEAT_ONE)){
+
+      m_conf.warn_deprecated(name(), "icon-repeatone", "icon-single");
+
+      m_icons->add("single", load_label(m_conf, name(), TAG_ICON_REPEAT_ONE));
+    }
+
+    if (m_formatter->has(TAG_ICON_CONSUME)) {
+      m_icons->add("consume", load_label(m_conf, name(), TAG_ICON_CONSUME));
     }
 
     if (m_formatter->has(TAG_LABEL_SONG)) {
@@ -82,7 +107,8 @@ namespace modules {
       m_label_time = load_optional_label(m_conf, name(), TAG_LABEL_TIME, "%elapsed% / %total%");
     }
     if (m_formatter->has(TAG_ICON_RANDOM) || m_formatter->has(TAG_ICON_REPEAT) ||
-        m_formatter->has(TAG_ICON_REPEAT_ONE)) {
+        m_formatter->has(TAG_ICON_REPEAT_ONE) || m_formatter->has(TAG_ICON_SINGLE) ||
+        m_formatter->has(TAG_ICON_CONSUME)) {
       m_toggle_on_color = m_conf.get(name(), "toggle-on-foreground", ""s);
       m_toggle_off_color = m_conf.get(name(), "toggle-off-foreground", ""s);
     }
@@ -141,7 +167,7 @@ namespace modules {
         m_mpd->connect();
       }
     } catch (const mpd_exception& err) {
-      m_log.trace("%s: %s", name(), err.what());
+      m_log.err("%s: %s", name(), err.what());
       m_mpd.reset();
       return def;
     }
@@ -159,12 +185,9 @@ namespace modules {
 
       int idle_flags = 0;
       if ((idle_flags = m_mpd->noidle()) != 0) {
+        // Update status on every event
         m_status->update(idle_flags, m_mpd.get());
         return true;
-      }
-
-      if (m_status->match_state(mpdstate::PLAYING)) {
-        m_status->update_timer();
       }
     } catch (const mpd_exception& err) {
       m_log.err("%s: %s", name(), err.what());
@@ -200,7 +223,13 @@ namespace modules {
       }
     }
 
+    if (m_status && m_status->match_state(mpdstate::PLAYING)) {
+      // Always update the status while playing
+      m_status->update(-1, m_mpd.get());
+    }
+
     string artist;
+    string album_artist;
     string album;
     string title;
     string date;
@@ -218,6 +247,7 @@ namespace modules {
 
         if (song && song.get()) {
           artist = song->get_artist();
+          album_artist = song->get_album_artist();
           album = song->get_album();
           title = song->get_title();
           date = song->get_date();
@@ -231,6 +261,7 @@ namespace modules {
     if (m_label_song) {
       m_label_song->reset_tokens();
       m_label_song->replace_token("%artist%", !artist.empty() ? artist : "untitled artist");
+      m_label_song->replace_token("%album-artist%", !album_artist.empty() ? album_artist : "untitled album artist");
       m_label_song->replace_token("%album%", !album.empty() ? album : "untitled album");
       m_label_song->replace_token("%title%", !title.empty() ? title : "untitled track");
       m_label_song->replace_token("%date%", !date.empty() ? date : "unknown date");
@@ -248,9 +279,12 @@ namespace modules {
     if (m_icons->has("repeat")) {
       m_icons->get("repeat")->m_foreground = m_status && m_status->repeat() ? m_toggle_on_color : m_toggle_off_color;
     }
-    if (m_icons->has("repeat_one")) {
-      m_icons->get("repeat_one")->m_foreground =
+    if (m_icons->has("single")) {
+      m_icons->get("single")->m_foreground =
           m_status && m_status->single() ? m_toggle_on_color : m_toggle_off_color;
+    }
+    if (m_icons->has("consume")) {
+      m_icons->get("consume")->m_foreground = m_status && m_status->consume() ? m_toggle_on_color : m_toggle_off_color;
     }
 
     return true;
@@ -294,8 +328,10 @@ namespace modules {
       builder->cmd(mousebtn::LEFT, EVENT_RANDOM, m_icons->get("random"));
     } else if (tag == TAG_ICON_REPEAT) {
       builder->cmd(mousebtn::LEFT, EVENT_REPEAT, m_icons->get("repeat"));
-    } else if (tag == TAG_ICON_REPEAT_ONE) {
-      builder->cmd(mousebtn::LEFT, EVENT_REPEAT_ONE, m_icons->get("repeat_one"));
+    } else if (tag == TAG_ICON_REPEAT_ONE || tag == TAG_ICON_SINGLE) {
+      builder->cmd(mousebtn::LEFT, EVENT_SINGLE, m_icons->get("single"));
+    } else if (tag == TAG_ICON_CONSUME) {
+      builder->cmd(mousebtn::LEFT, EVENT_CONSUME, m_icons->get("consume"));
     } else if (tag == TAG_ICON_PREV) {
       builder->cmd(mousebtn::LEFT, EVENT_PREV, m_icons->get("prev"));
     } else if ((tag == TAG_ICON_STOP || tag == TAG_TOGGLE_STOP) && (is_playing || is_paused)) {
@@ -322,6 +358,8 @@ namespace modules {
       return false;
     }
 
+    m_log.info("%s: event: %s", name(), cmd);
+
     try {
       auto mpd = factory_util::unique<mpdconnection>(m_log, m_host, m_port, m_pass);
       mpd->connect();
@@ -342,23 +380,25 @@ namespace modules {
         mpd->prev();
       } else if (cmd == EVENT_NEXT && !is_stopped) {
         mpd->next();
-      } else if (cmd == EVENT_REPEAT_ONE) {
+      } else if (cmd == EVENT_SINGLE) {
         mpd->set_single(!status->single());
       } else if (cmd == EVENT_REPEAT) {
         mpd->set_repeat(!status->repeat());
       } else if (cmd == EVENT_RANDOM) {
         mpd->set_random(!status->random());
+      } else if (cmd == EVENT_CONSUME) {
+        mpd->set_consume(!status->consume());
       } else if (cmd.compare(0, strlen(EVENT_SEEK), EVENT_SEEK) == 0) {
         auto s = cmd.substr(strlen(EVENT_SEEK));
         int percentage = 0;
         if (s.empty()) {
           return false;
         } else if (s[0] == '+') {
-          percentage = status->get_elapsed_percentage() + std::atoi(s.substr(1).c_str());
+          percentage = status->get_elapsed_percentage() + std::strtol(s.substr(1).c_str(), nullptr, 10);
         } else if (s[0] == '-') {
-          percentage = status->get_elapsed_percentage() - std::atoi(s.substr(1).c_str());
+          percentage = status->get_elapsed_percentage() - std::strtol(s.substr(1).c_str(), nullptr, 10);
         } else {
-          percentage = std::atoi(s.c_str());
+          percentage = std::strtol(s.c_str(), nullptr, 10);
         }
         mpd->seek(status->get_songid(), status->get_seek_position(percentage));
       } else {

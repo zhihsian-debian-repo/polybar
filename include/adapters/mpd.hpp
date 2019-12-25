@@ -64,6 +64,7 @@ namespace mpd {
     operator bool();
 
     string get_artist();
+    string get_album_artist();
     string get_album();
     string get_title();
     string get_date();
@@ -107,6 +108,7 @@ namespace mpd {
     void set_repeat(bool mode);
     void set_random(bool mode);
     void set_single(bool mode);
+    void set_consume(bool mode);
 
     operator mpd_connection_t::element_type*();
 
@@ -139,11 +141,11 @@ namespace mpd {
 
     void fetch_data(mpdconnection* conn);
     void update(int event, mpdconnection* connection);
-    void update_timer();
 
     bool random() const;
     bool repeat() const;
     bool single() const;
+    bool consume() const;
 
     bool match_state(mpdstate state) const;
 
@@ -165,6 +167,7 @@ namespace mpd {
     bool m_random{false};
     bool m_repeat{false};
     bool m_single{false};
+    bool m_consume{false};
 
     int m_songid{0};
     int m_queuelen{0};

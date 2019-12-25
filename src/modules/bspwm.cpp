@@ -122,7 +122,10 @@ namespace modules {
       m_modelabels.emplace(mode::NODE_LOCKED, load_optional_label(m_conf, name(), "label-locked"));
       m_modelabels.emplace(mode::NODE_STICKY, load_optional_label(m_conf, name(), "label-sticky"));
       m_modelabels.emplace(mode::NODE_PRIVATE, load_optional_label(m_conf, name(), "label-private"));
+      m_modelabels.emplace(mode::NODE_MARKED, load_optional_label(m_conf, name(), "label-marked"));
     }
+
+    m_labelseparator = load_optional_label(m_conf, name(), "label-separator", "");
 
     m_icons = factory_util::shared<iconset>();
     m_icons->add(DEFAULT_ICON, factory_util::shared<label>(m_conf.get(name(), DEFAULT_ICON, ""s)));
@@ -317,6 +320,9 @@ namespace modules {
               case 'P':
                 mode_flag = mode::NODE_PRIVATE;
                 break;
+              case 'M':
+                mode_flag = mode::NODE_MARKED;
+                break;
               default:
                 m_log.warn("%s: Undefined G => '%s'", name(), value.substr(i, 1));
             }
@@ -400,6 +406,10 @@ namespace modules {
 
       for (auto&& ws : m_monitors[m_index]->workspaces) {
         if (ws.second.get()) {
+          if(workspace_n != 0 && *m_labelseparator) {
+            builder->node(m_labelseparator);
+          }
+
           workspace_n++;
 
           if (m_click) {
@@ -487,14 +497,14 @@ namespace modules {
 
     if (m_pinworkspaces) {
       modifier = ".local";
-    }
-
-    for (const auto& mon : m_monitors) {
-      if (m_bar.monitor->match(mon->name, false) && !mon->focused) {
-        send_command("monitor -f " + mon->name, "Sending monitor focus command to ipc handler");
-        break;
+      for (const auto& mon : m_monitors) {
+        if (m_bar.monitor->match(mon->name, false) && !mon->focused) {
+          send_command("monitor -f " + mon->name, "Sending monitor focus command to ipc handler");
+          break;
+        }
       }
     }
+
 
     send_command("desktop -f " + scrolldir + modifier, "Sending desktop " + scrolldir + " command to ipc handler");
 

@@ -90,10 +90,6 @@ void builder::node(string str, bool add_space) {
   string::size_type n, m;
   string s(move(str));
 
-  if ((n = s.size()) > 2 && s[0] == '"' && s[n - 1] == '"') {
-    s = s.substr(1, n - 2);
-  }
-
   while (true) {
     if (s.empty()) {
       break;
@@ -123,7 +119,7 @@ void builder::node(string str, bool add_space) {
       s.erase(0, 5);
 
     } else if ((n = s.find("%{T")) == 0 && (m = s.find('}')) != string::npos) {
-      font(atoi(s.substr(n + 3, m - 3).c_str()));
+      font(strtol(s.substr(n + 3, m - 3).c_str(), nullptr, 10));
       s.erase(n, m + 1);
 
     } else if ((n = s.find("%{U-}")) == 0) {
@@ -190,7 +186,7 @@ void builder::node(string str, bool add_space) {
 /**
  * Insert text node with specific font index
  *
- * @see builder::node
+ * \see builder::node
  */
 void builder::node(string str, int font_index, bool add_space) {
   font(font_index);
@@ -206,11 +202,7 @@ void builder::node(const label_t& label, bool add_space) {
     return;
   }
 
-  string text{label->get()};
-
-  if (label->m_maxlen > 0 && string_util::char_len(text) > label->m_maxlen) {
-    text = string_util::utf8_truncate(std::move(text), label->m_maxlen) + "...";
-  }
+  auto text = get_label_text(label);
 
   // if ((label->m_overline.empty() && m_tags[syntaxtag::o] > 0) || (m_tags[syntaxtag::o] > 0 && label->m_margin > 0))
   //   overline_close();
@@ -356,8 +348,6 @@ void builder::background(string color) {
     string bg{background_hex()};
     color = "#" + color.substr(color.length() - 2);
     color += bg.substr(bg.length() - (bg.length() < 6 ? 3 : 6));
-  } else if (color.length() >= 7 && color == "#" + string(color.length() - 1, color[1])) {
-    color = color.substr(0, 4);
   }
 
   color = color_util::simplify_hex(color);
@@ -383,8 +373,6 @@ void builder::color(string color) {
       color = "#" + color.substr(color.length() - 2);
       color += fg.substr(fg.length() - (fg.length() < 6 ? 3 : 6));
     }
-  } else if (color.length() >= 7 && color == "#" + string(color.length() - 1, color[1])) {
-    color = color.substr(0, 4);
   }
 
   color = color_util::simplify_hex(color);
@@ -511,11 +499,7 @@ void builder::underline_close() {
  */
 void builder::cmd(mousebtn index, string action, bool condition) {
   if (condition && !action.empty()) {
-    size_t p{0};
-    while ((p = action.find(':', p)) != string::npos && action[p - 1] != '\\') {
-      action.insert(p, 1, '\\');
-      p++;
-    }
+    action = string_util::replace_all(action, ":", "\\:");
     tag_open(syntaxtag::A, to_string(static_cast<int>(index)) + ":" + action + ":");
   }
 }
@@ -558,6 +542,23 @@ string builder::foreground_hex() {
     m_foreground = color_util::hex<unsigned short int>(m_bar.foreground);
   }
   return m_foreground;
+}
+
+string builder::get_label_text(const label_t& label) {
+  string text{label->get()};
+
+  size_t maxlen = label->m_maxlen;
+
+  if (maxlen > 0 && string_util::char_len(text) > maxlen) {
+    if (label->m_ellipsis) {
+      text = string_util::utf8_truncate(std::move(text), maxlen - 3) + "...";
+    }
+    else {
+      text = string_util::utf8_truncate(std::move(text), maxlen);
+    }
+  }
+
+  return text;
 }
 
 /**

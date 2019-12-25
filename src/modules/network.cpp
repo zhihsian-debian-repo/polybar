@@ -20,6 +20,7 @@ namespace modules {
     m_udspeed_minwidth = m_conf.get(name(), "udspeed-minwidth", m_udspeed_minwidth);
     m_accumulate = m_conf.get(name(), "accumulate-stats", m_accumulate);
     m_interval = m_conf.get<decltype(m_interval)>(name(), "interval", 1s);
+    m_unknown_up = m_conf.get<bool>(name(), "unknown-as-up", false);
 
     m_conf.warn_deprecated(name(), "udspeed-minwidth", "%downspeed:min:max% and %upspeed:min:max%");
 
@@ -62,8 +63,10 @@ namespace modules {
     // Get an intstance of the network interface
     if (net::is_wireless_interface(m_interface)) {
       m_wireless = factory_util::unique<net::wireless_network>(m_interface);
+      m_wireless->set_unknown_up(m_unknown_up);
     } else {
       m_wired = factory_util::unique<net::wired_network>(m_interface);
+      m_wired->set_unknown_up(m_unknown_up);
     };
 
     // We only need to start the subthread if the packetloss animation is used
@@ -83,6 +86,7 @@ namespace modules {
 
     if (!network->query(m_accumulate)) {
       m_log.warn("%s: Failed to query interface '%s'", name(), m_interface);
+      m_connected = false;
       return false;
     }
 
@@ -113,6 +117,7 @@ namespace modules {
       label->reset_tokens();
       label->replace_token("%ifname%", m_interface);
       label->replace_token("%local_ip%", network->ip());
+      label->replace_token("%local_ip6%", network->ip6());
       label->replace_token("%upspeed%", upspeed);
       label->replace_token("%downspeed%", downspeed);
 
@@ -130,6 +135,9 @@ namespace modules {
     }
     if (m_label[connection_state::PACKETLOSS]) {
       replace_tokens(m_label[connection_state::PACKETLOSS]);
+    }
+    if (m_label[connection_state::DISCONNECTED]) {
+      replace_tokens(m_label[connection_state::DISCONNECTED]);
     }
 
     return true;

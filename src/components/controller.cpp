@@ -5,7 +5,6 @@
 #include "components/controller.hpp"
 #include "components/ipc.hpp"
 #include "components/logger.hpp"
-#include "components/renderer.hpp"
 #include "components/types.hpp"
 #include "events/signal.hpp"
 #include "events/signal_emitter.hpp"
@@ -18,7 +17,6 @@
 #include "utils/time.hpp"
 #include "x11/connection.hpp"
 #include "x11/extensions/all.hpp"
-#include "x11/tray_manager.hpp"
 #include "x11/types.hpp"
 
 POLYBAR_NS
@@ -28,6 +26,10 @@ sig_atomic_t g_reload{0};
 sig_atomic_t g_terminate{0};
 
 void interrupt_handler(int signum) {
+  if (g_reload || g_terminate) {
+    return;
+  }
+
   g_terminate = 1;
   g_reload = (signum == SIGUSR1);
   if (write(g_eventpipe[PIPE_WRITE], &g_terminate, 1) == -1) {
@@ -103,7 +105,7 @@ controller::controller(connection& conn, signal_emitter& emitter, const logger& 
           throw application_error("Inter-process messaging needs to be enabled");
         }
 
-        m_modules[align].emplace_back(make_module(move(type), m_bar->settings(), module_name));
+        m_modules[align].emplace_back(make_module(move(type), m_bar->settings(), module_name, m_log));
         created_modules++;
       } catch (const runtime_error& err) {
         m_log.err("Disabling module \"%s\" (reason: %s)", module_name, err.what());
@@ -124,6 +126,12 @@ controller::~controller() {
   signal(SIGINT, SIG_DFL);
   signal(SIGQUIT, SIG_DFL);
   signal(SIGTERM, SIG_DFL);
+  signal(SIGALRM, SIG_DFL);
+
+  if (g_reload) {
+    // Cause SIGUSR1 to be ignored until registered in the new polybar process
+    signal(SIGUSR1, SIG_IGN);
+  }
 
   m_log.trace("controller: Detach signal receiver");
   m_sig.detach(this);
@@ -275,7 +283,20 @@ void controller::read_events() {
     int events = select(maxfd + 1, &readfds, nullptr, nullptr, nullptr);
 
     // Check for errors
-    if (events == -1 || g_terminate || m_connection.connection_has_error()) {
+    if (events == -1)  {
+
+      /*
+       * The Interrupt errno is generated when polybar is stopped, so it
+       * shouldn't generate an error message
+       */
+      if (errno != EINTR) {
+        m_log.err("select failed in event loop: %s", strerror(errno));
+      }
+
+      break;
+    }
+
+    if (g_terminate || m_connection.connection_has_error()) {
       break;
     }
 
@@ -337,7 +358,12 @@ void controller::read_events() {
  */
 void controller::process_eventqueue() {
   m_log.info("Eventqueue worker (thread-id=%lu)", this_thread::get_id());
-  m_sig.emit(signals::eventqueue::start{});
+  if (!m_writeback) {
+    m_sig.emit(signals::eventqueue::start{});
+  } else {
+    // bypass the start eventqueue signal
+    m_sig.emit(signals::ui::ready{});
+  }
 
   while (!g_terminate) {
     event evt{};
@@ -668,6 +694,12 @@ bool controller::on(const signals::ipc::hook& evt) {
   }
 
   return true;
+}
+
+bool controller::on(const signals::ui::update_background&) {
+  enqueue(make_update_evt(true));
+
+  return false;
 }
 
 POLYBAR_NS_END

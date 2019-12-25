@@ -912,7 +912,7 @@ def _c_serialize_helper_fields_fixed_size(context, self, field,
             # need to register a temporary variable for the expression in case we know its type
             if field.type.c_type is None:
                 raise Exception("type for field '%s' (expression '%s') unkown" %
-                                (field.field_name, _c_accessor_get_expr(field.type.expr)))
+                                (field.field_name, _c_accessor_get_expr(field.type.expr, prefix)))
 
             temp_vars.append('    %s xcb_expr_%s = %s;' % (field.type.c_type, _cpp(field.field_name),
                                                            _c_accessor_get_expr(field.type.expr, prefix)))
@@ -2497,7 +2497,7 @@ def _man_request(self, name, cookie_type, void, aux):
                 for field in b.type.fields:
                     _c_complex_field(self, field, space)
                 if b.type.has_name:
-                    print >> sys.stderr, 'ERROR: New unhandled documentation case'
+                    print('ERROR: New unhandled documentation case', file=sys.stderr)
                     pass
 
         f.write('} \\fB%s\\fP;\n' % self.reply.c_type)
@@ -2835,7 +2835,7 @@ def _man_event(self, name):
             spacing = ' ' * (maxtypelen - len(field.c_field_type))
             f.write('%s    %s%s \\fI%s\\fP%s;\n' % (space, field.c_field_type, spacing, field.c_field_name, field.c_subscript))
         else:
-            print >> sys.stderr, 'ERROR: New unhandled documentation case'
+            print('ERROR: New unhandled documentation case', file=sys.stderr)
 
     if not self.is_switch:
         for field in struct_fields:
@@ -2848,7 +2848,7 @@ def _man_event(self, name):
             for field in b.type.fields:
                 _c_complex_field(self, field, space)
             if b.type.has_name:
-                print >> sys.stderr, 'ERROR: New unhandled documentation case'
+                print('ERROR: New unhandled documentation case', file=sys.stderr)
                 pass
 
     f.write('} \\fB%s\\fP;\n' % self.c_type)
@@ -3051,69 +3051,6 @@ def cpp_error(self, name):
     #     # Typedef
     #     _h('')
     #     _h('typedef %s %s;', _t(self.name + ('error',)), _t(name + ('error',)))
-
-def cpp_prototypes():
-    _h("namespace request {")
-    for request in _request_classes:
-        _h("  class %s;", request)
-    _h("} // namespace request")
-    _h("")
-
-    def ctor(name, type):
-        return """\
-    %s(const xcb_%s_t & %s)
-      : m_%s(%s)
-    {}\
-""" % (name, type, name, name, name)
-
-    for key in _type_objects[get_namespace(_ns)].keys():
-        name = _ext(_n_item(key))
-        type = ("" if get_namespace(_ns) == "xproto" else get_namespace(_ns) + "_") + name
-
-        if len(_type_objects[get_namespace(_ns)][key]) > 0:
-            _h("class %s {", name)
-            _h("  public:")
-            _h(ctor(name, type))
-            _h("")
-            _h("    const xcb_%s_t & operator*(void)", type)
-            _h("    {")
-            _h("      return m_%s;", name)
-            _h("    }")
-            _h("")
-
-            for (proto, body) in _type_objects[get_namespace(_ns)][key]:
-                _h("%s", proto)
-                _h("")
-
-            _h("  private:")
-            _h("    connection m_c;")
-            _h("    xcb_%s_t m_%s;", type, name)
-            _h("}; // class %s", name)
-            _h("")
-
-def cpp_type_classes():
-    for key in _type_objects[get_namespace(_ns)].keys():
-        type = _ext(_n_item(key))
-        if len(_type_objects[get_namespace(_ns)][key]) > 0:
-            # _h("")
-            # _h("class %s {", type)
-            # _h("  public:")
-            # _h("    const xcb_%s_t & operator*(void)", type)
-            # _h("    {")
-            # _h("      return m_%s;", type)
-            # _h("    }")
-            # _h("")
-
-            for (proto, body) in _type_objects[get_namespace(_ns)][key]:
-                # _h("%s", proto)
-                _h("%s", body)
-                _h("")
-
-            # _h("  private:")
-            # _h("    connection m_c;")
-            # _h("    xcb_%s_t m_%s;", type, type)
-            # _h("}; // class %s", type)
-            # _h("")
 
 # Main routine starts here
 

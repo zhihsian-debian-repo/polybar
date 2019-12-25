@@ -52,6 +52,8 @@ namespace modules {
       m_modelabel = load_optional_label(m_conf, name(), "label-mode", "%mode%");
     }
 
+    m_labelseparator = load_optional_label(m_conf, name(), "label-separator", "");
+
     m_icons = factory_util::shared<iconset>();
     m_icons->add(DEFAULT_WS_ICON, factory_util::shared<label>(m_conf.get(name(), DEFAULT_WS_ICON, ""s)));
 
@@ -100,11 +102,25 @@ namespace modules {
       m_ipc->handle_event();
       return true;
     } catch (const exception& err) {
+      try {
+        m_log.warn("%s: Attempting to reconnect socket (reason: %s)", name(), err.what());
+        m_ipc->connect_event_socket(true);
+        m_log.info("%s: Reconnecting socket succeeded", name());
+      } catch (const exception& err) {
+        m_log.err("%s: Failed to reconnect socket (reason: %s)", name(), err.what());
+      }
       return false;
     }
   }
 
   bool i3_module::update() {
+    /*
+     * update only populates m_workspaces and those are only needed when
+     * <label-state> appears in the format
+     */
+    if (!m_formatter->has(TAG_LABEL_STATE)) {
+      return true;
+    }
     m_workspaces.clear();
     i3_util::connection_t ipc;
 
@@ -171,7 +187,19 @@ namespace modules {
         builder->cmd(mousebtn::SCROLL_UP, EVENT_SCROLL_UP);
       }
 
+      bool first = true;
       for (auto&& ws : m_workspaces) {
+        /*
+         * The separator should only be inserted in between the workspaces, so
+         * we insert it in front of all workspaces except the first one.
+         */
+        if(first) {
+          first = false;
+        }
+        else if (*m_labelseparator) {
+          builder->node(m_labelseparator);
+        }
+
         if (m_click) {
           builder->cmd(mousebtn::LEFT, string{EVENT_CLICK} + ws->name);
           builder->node(ws->label);
@@ -202,10 +230,8 @@ namespace modules {
 
       if (cmd.compare(0, strlen(EVENT_CLICK), EVENT_CLICK) == 0) {
         cmd.erase(0, strlen(EVENT_CLICK));
-        if (i3_util::focused_workspace(conn)->name != cmd) {
-          m_log.info("%s: Sending workspace focus command to ipc handler", name());
-          conn.send_command("workspace " + cmd);
-        }
+        m_log.info("%s: Sending workspace focus command to ipc handler", name());
+        conn.send_command(make_workspace_command(cmd));
         return true;
       }
 
@@ -231,14 +257,14 @@ namespace modules {
       if (scrolldir == "next" && (m_wrap || next(current_ws) != workspaces.end())) {
         if (!(*current_ws)->focused) {
           m_log.info("%s: Sending workspace focus command to ipc handler", name());
-          conn.send_command("workspace " + (*current_ws)->name);
+          conn.send_command(make_workspace_command((*current_ws)->name));
         }
         m_log.info("%s: Sending workspace next_on_output command to ipc handler", name());
         conn.send_command("workspace next_on_output");
       } else if (scrolldir == "prev" && (m_wrap || current_ws != workspaces.begin())) {
         if (!(*current_ws)->focused) {
           m_log.info("%s: Sending workspace focus command to ipc handler", name());
-          conn.send_command("workspace " + (*current_ws)->name);
+          conn.send_command(make_workspace_command((*current_ws)->name));
         }
         m_log.info("%s: Sending workspace prev_on_output command to ipc handler", name());
         conn.send_command("workspace prev_on_output");
@@ -250,6 +276,10 @@ namespace modules {
 
     return true;
   }
-}
+
+  string i3_module::make_workspace_command(const string& workspace) {
+    return "workspace \"" + workspace + "\"";
+  }
+}  // namespace modules
 
 POLYBAR_NS_END

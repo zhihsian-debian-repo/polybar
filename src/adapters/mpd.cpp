@@ -10,6 +10,8 @@
 
 POLYBAR_NS
 
+#define TRACE_BOOL(mode) m_log.trace("mpdconnection.%s: %s", __func__, mode ? "true" : "false");
+
 namespace mpd {
   sig_atomic_t g_connection_closed = 0;
   void g_mpd_signal_handler(int signum) {
@@ -29,15 +31,26 @@ namespace mpd {
 
   void check_errors(mpd_connection* conn) {
     check_connection(conn);
+
+    string err_msg;
+
     switch (mpd_connection_get_error(conn)) {
       case MPD_ERROR_SUCCESS:
         return;
       case MPD_ERROR_SERVER:
-        mpd_connection_clear_error(conn);
-        throw server_error(mpd_connection_get_error_message(conn), mpd_connection_get_server_error(conn));
+        {
+          err_msg = mpd_connection_get_error_message(conn);
+          enum mpd_server_error server_err = mpd_connection_get_server_error(conn);
+          mpd_connection_clear_error(conn);
+          throw server_error(err_msg, server_err);
+        }
       default:
-        mpd_connection_clear_error(conn);
-        throw client_error(mpd_connection_get_error_message(conn), mpd_connection_get_error(conn));
+        {
+          err_msg = mpd_connection_get_error_message(conn);
+          enum mpd_error err = mpd_connection_get_error(conn);
+          mpd_connection_clear_error(conn);
+          throw client_error(err_msg, err);
+        }
     }
   }
 
@@ -71,6 +84,12 @@ namespace mpd {
     auto tag = mpd_song_get_tag(m_song.get(), MPD_TAG_ARTIST, 0);
     return string{tag != nullptr ? tag : ""};
   }
+
+  string mpdsong::get_album_artist() {
+    assert(m_song);
+    auto tag = mpd_song_get_tag(m_song.get(), MPD_TAG_ALBUM_ARTIST, 0);
+    return string{tag != nullptr ? tag : ""};
+}
 
   string mpdsong::get_album() {
     assert(m_song);
@@ -233,6 +252,7 @@ namespace mpd {
 
   void mpdconnection::pause(bool state) {
     try {
+      TRACE_BOOL(state);
       check_prerequisites_commands_list();
       mpd_run_pause(m_connection.get(), state);
       check_errors(m_connection.get());
@@ -293,6 +313,7 @@ namespace mpd {
 
   void mpdconnection::set_repeat(bool mode) {
     try {
+      TRACE_BOOL(mode);
       check_prerequisites_commands_list();
       mpd_run_repeat(m_connection.get(), mode);
       check_errors(m_connection.get());
@@ -303,6 +324,7 @@ namespace mpd {
 
   void mpdconnection::set_random(bool mode) {
     try {
+      TRACE_BOOL(mode);
       check_prerequisites_commands_list();
       mpd_run_random(m_connection.get(), mode);
       check_errors(m_connection.get());
@@ -313,11 +335,23 @@ namespace mpd {
 
   void mpdconnection::set_single(bool mode) {
     try {
+      TRACE_BOOL(mode);
       check_prerequisites_commands_list();
       mpd_run_single(m_connection.get(), mode);
       check_errors(m_connection.get());
     } catch (const mpd_exception& e) {
       m_log.err("mpdconnection.set_single: %s", e.what());
+    }
+  }
+
+  void mpdconnection::set_consume(bool mode) {
+    try {
+      TRACE_BOOL(mode);
+      check_prerequisites_commands_list();
+      mpd_run_consume(m_connection.get(), mode);
+      check_errors(m_connection.get());
+    } catch (const mpd_exception& e) {
+      m_log.err("mpdconnection.set_consume: %s", e.what());
     }
   }
 
@@ -354,12 +388,17 @@ namespace mpd {
     m_random = mpd_status_get_random(m_status.get());
     m_repeat = mpd_status_get_repeat(m_status.get());
     m_single = mpd_status_get_single(m_status.get());
+    m_consume = mpd_status_get_consume(m_status.get());
     m_elapsed_time = mpd_status_get_elapsed_time(m_status.get());
     m_total_time = mpd_status_get_total_time(m_status.get());
   }
 
   void mpdstatus::update(int event, mpdconnection* connection) {
-    if (connection == nullptr || !static_cast<bool>(event & (MPD_IDLE_PLAYER | MPD_IDLE_OPTIONS | MPD_IDLE_PLAYLIST))) {
+    /*
+     * Only update if either the player state (play, stop, pause, seek, ...), the options (random, repeat, ...),
+     * or the playlist has been changed
+     */
+    if (connection == nullptr || !static_cast<bool>(event & (MPD_IDLE_PLAYER | MPD_IDLE_OPTIONS | MPD_IDLE_QUEUE))) {
       return;
     }
 
@@ -384,14 +423,6 @@ namespace mpd {
     }
   }
 
-  void mpdstatus::update_timer() {
-    auto diff = chrono::system_clock::now() - m_updated_at;
-    auto dur = chrono::duration_cast<chrono::milliseconds>(diff);
-    m_elapsed_time_ms += dur.count();
-    m_elapsed_time = m_elapsed_time_ms / 1000 + 0.5f;
-    m_updated_at = chrono::system_clock::now();
-  }
-
   bool mpdstatus::random() const {
     return m_random;
   }
@@ -402,6 +433,10 @@ namespace mpd {
 
   bool mpdstatus::single() const {
     return m_single;
+  }
+
+  bool mpdstatus::consume() const {
+    return m_consume;
   }
 
   bool mpdstatus::match_state(mpdstate state) const {
@@ -453,5 +488,7 @@ namespace mpd {
 
   // }}}
 }
+
+#undef TRACE_BOOL
 
 POLYBAR_NS_END

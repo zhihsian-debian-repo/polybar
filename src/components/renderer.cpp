@@ -7,6 +7,7 @@
 #include "utils/file.hpp"
 #include "utils/math.hpp"
 #include "x11/atoms.hpp"
+#include "x11/background_manager.hpp"
 #include "x11/connection.hpp"
 #include "x11/extensions/all.hpp"
 #include "x11/winspec.hpp"
@@ -25,7 +26,8 @@ renderer::make_type renderer::make(const bar_settings& bar) {
       signal_emitter::make(),
       config::make(),
       logger::make(),
-      forward<decltype(bar)>(bar));
+      forward<decltype(bar)>(bar),
+      background_manager::make());
   // clang-format on
 }
 
@@ -33,13 +35,14 @@ renderer::make_type renderer::make(const bar_settings& bar) {
  * Construct renderer instance
  */
 renderer::renderer(
-    connection& conn, signal_emitter& sig, const config& conf, const logger& logger, const bar_settings& bar)
+    connection& conn, signal_emitter& sig, const config& conf, const logger& logger, const bar_settings& bar, background_manager& background)
     : m_connection(conn)
     , m_sig(sig)
     , m_conf(conf)
     , m_log(logger)
     , m_bar(forward<const bar_settings&>(bar))
     , m_rect(m_bar.inner_area()) {
+
   m_sig.attach(this);
   m_log.trace("renderer: Get TrueColor visual");
   {
@@ -153,13 +156,19 @@ renderer::renderer(
       string pattern{f};
       size_t pos = pattern.rfind(';');
       if (pos != string::npos) {
-        offset = std::atoi(pattern.substr(pos + 1).c_str());
+        offset = std::strtol(pattern.substr(pos + 1).c_str(), nullptr, 10);
         pattern.erase(pos);
       }
       auto font = cairo::make_font(*m_context, string{pattern}, offset, dpi_x, dpi_y);
       m_log.info("Loaded font \"%s\" (name=%s, offset=%i, file=%s)", pattern, font->name(), offset, font->file());
       *m_context << move(font);
     }
+  }
+
+  m_pseudo_transparency = m_conf.get<bool>("settings", "pseudo-transparency", m_pseudo_transparency);
+  if (m_pseudo_transparency) {
+    m_log.trace("Activate root background manager");
+    m_background = background.observe(m_bar.outer_area(false), m_window);
   }
 
   m_comp_bg = m_conf.get<cairo_operator_t>("settings", "compositing-background", m_comp_bg);
@@ -213,6 +222,12 @@ void renderer::begin(xcb_rectangle_t rect) {
   // Clear canvas
   m_context->save();
   m_context->clear();
+
+  // when pseudo-transparency is requested, render the bar into a new layer
+  // that will later be composited against the desktop background
+  if (m_pseudo_transparency) {
+    m_context->push();
+  }
 
   // Create corner mask
   if (m_bar.radius && m_cornermask == nullptr) {
@@ -283,6 +298,26 @@ void renderer::end() {
     m_context->destroy(&blockcontents);
   } else {
     fill_background();
+  }
+
+
+  // For pseudo-transparency, capture the contents of the rendered bar and
+  // composite it against the desktop wallpaper. This way transparent parts of
+  // the bar will be filled by the wallpaper creating illusion of transparency.
+  if (m_pseudo_transparency) {
+    cairo_pattern_t* barcontents{};
+    m_context->pop(&barcontents); // corresponding push is in renderer::begin
+
+    auto root_bg = m_background->get_surface();
+    if (root_bg != nullptr) {
+      m_log.trace_x("renderer: root background");
+      *m_context << *root_bg;
+      m_context->paint();
+      *m_context << CAIRO_OPERATOR_OVER;
+    }
+    *m_context << barcontents;
+    m_context->paint();
+    m_context->destroy(&barcontents);
   }
 
   m_context->restore();
@@ -763,7 +798,7 @@ bool renderer::on(const signals::parser::action_begin& evt) {
   action.button = a.button == mousebtn::NONE ? mousebtn::LEFT : a.button;
   action.align = m_align;
   action.start_x = m_blocks.at(m_align).x;
-  action.command = string_util::replace_all(a.command, "\\:", ":");
+  action.command = a.command;
   action.active = true;
   m_actions.emplace_back(action);
   return true;

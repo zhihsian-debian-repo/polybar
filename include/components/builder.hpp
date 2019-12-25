@@ -13,8 +13,6 @@ using std::map;
 namespace drawtypes {
   class label;
   using label_t = shared_ptr<label>;
-  using icon = label;
-  using icon_t = label_t;
 }
 using namespace drawtypes;
 
@@ -58,6 +56,8 @@ class builder {
  protected:
   string background_hex();
   string foreground_hex();
+
+  string get_label_text(const label_t& label);
 
   void tag_open(syntaxtag tag, const string& value);
   void tag_open(attribute attr);

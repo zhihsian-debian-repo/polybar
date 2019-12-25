@@ -27,7 +27,8 @@ namespace modules {
       STATE_PSEUDOTILED,
       NODE_LOCKED,
       NODE_STICKY,
-      NODE_PRIVATE
+      NODE_PRIVATE,
+      NODE_MARKED
     };
 
     struct bspwm_monitor {
@@ -74,6 +75,11 @@ namespace modules {
     map<unsigned int, label_t> m_statelabels;
     label_t m_monitorlabel;
     iconset_t m_icons;
+
+    /**
+     * Separator that is inserted in between workspaces
+     */
+    label_t m_labelseparator;
 
     bool m_click{true};
     bool m_scroll{true};
