@@ -1,3 +1,9 @@
+polybar (3.4.3-1) unstable; urgency=medium
+
+  * GCC 10 Compilation (#2098), see #2097
+
+ -- Zhihsian Que <i@zhihsian.me>  Sun, 7 Jun 2020 20:52:45 +0800
+
 polybar (3.4.1-1) unstable; urgency=medium
 
   * ipc:
